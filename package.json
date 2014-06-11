@@ -1,0 +1,23 @@
+{
+  "name": "qbl-storage",
+  "version": "0.0.0",
+  "description": "Storage Backend Writer of Qabel",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "async": "*",
+    "busboy": "*",
+    "connect": "2.0.0",
+    "dirlist": "^1.0.2",
+    "redis": "*",
+    "basic-auth": "*",
+    "uuid": "*"
+  },
+  "keywords": [
+    "qabel"
+  ],
+  "author": "Enno Boland <boland@praemandatum.de>",
+  "license": "QPL"
+}

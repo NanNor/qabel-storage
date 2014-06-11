@@ -1,0 +1,15 @@
+Howto install Qabel-Storage
+---------------------------
+
+Install redis, node.js and npm:
+
+	apt-get install node npm redis-server
+
+Install project dependencies for Qabel-Storage
+
+	cd <project dir>
+	npm install
+
+make sure redis is running and start up the node server
+
+	node app.js

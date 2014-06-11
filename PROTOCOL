@@ -1,0 +1,26 @@
+- servers hostname is server
+
+creating a new storage
+----------------------
+
+- POST or PUT http://server/_new
+- returns JSON:
+	{
+		public: [string], // public token for read access
+		revokeToken: [string], // private token for deleting the storage
+		token: [string]	// secret token to allow write access
+	}
+
+uploading a blob
+----------------
+
+- POST or PUT http://server/:public/:blobname
+
+- ```public``` is the public token of the storage
+- ```blobname``` is a identifier for that blob. think of it like a filename (it
+  actually is a filename in the backend)
+
+The client must use http-auth to be authorized by the server. user is ignored,
+only password is used.
+
+the body of the request contains the file content
