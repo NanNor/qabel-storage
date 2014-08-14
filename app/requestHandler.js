@@ -4,7 +4,6 @@ var uuid = require("uuid");
 var crypto = require('crypto');
 var async = require('async');
 var child_process = require('child_process');
-var basicAuth = require('basic-auth');
 
 function RequestHandler(redis) {
 	var self = this;
@@ -107,8 +106,9 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 	self._redis.hget(public, "revertToken", function(err, revertToken) {
 		if(err)
 			return self.error(err, res);
-		var tokenMissing = false; // todo: read token from header
-		var authFailed = basicAuth(req).pass == revertToken;
+		var submittedToken = req.headers[process.config.tokenHeader];
+		var tokenMissing = submittedToken == null;
+		var authFailed = submittedToken != revertToken;
 
 		if(tokenMissing) {
 			// no token has been submitted
@@ -143,24 +143,26 @@ RequestHandler.prototype.uploadFile = function(req, res) {
 
 	if(token === undefined || public === undefined)
 		return self.error(new Error(), res);
-	auth = basicAuth(req);
 
-	if(auth === undefined) {
+	var submittedToken = req.headers[process.config.tokenHeader];
+
+	var tokenMissing = submittedToken == null;
+	if(tokenMissing) {
 		// no token submitted
 		res.writeHead(401);
 		return res.end("Revoke token required");
 	}
 
-	self._redis.hget(public, 'token', function(err, value) {
+	self._redis.hget(public, 'token', function(err, storedToken) {
 		if(err) {
 			return self.error(err, res);
 		}
-		else if(value === null) {
+		else if(storedToken === null) {
 			// invalid (unused) storage volume id (public)
 			res.writeHead(404);
 			return res.end("Unknown Storage Volume");
 		}
-		else if(auth.pass !== null && value !== null && value === auth.pass) {
+		else if(storedToken === submittedToken) {
 			var saveTo = path.join(process.config.dataDir, public, chunkname);
 			req.pipe(fs.createWriteStream(saveTo));
 			req.on('end', function() {
