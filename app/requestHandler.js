@@ -87,6 +87,8 @@ RequestHandler.prototype.newStorage = function(res) {
 		if(err) {
 			self.error(err, res);
 		}
+		// storage volume created
+		res.writeHead(201);
 		res.end(JSON.stringify({
 			public: public,
 			revoke_token: revoke_token,
@@ -105,15 +107,24 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 	self._redis.hget(public, "revertToken", function(err, revertToken) {
 		if(err)
 			return self.error(err, res);
-		var doDelete = basicAuth(req).pass == revertToken;
+		var tokenMissing = false; // todo: read token from header
+		var authFailed = basicAuth(req).pass == revertToken;
 
-		if(!doDelete) {
+		if(tokenMissing) {
+			// no token has been submitted
+			res.writeHead(401);
+			return res.end("Token required");
+		}
+		if(authFailed) {
+			// Invalid token
 			res.writeHead(403);
-			return res.end("Forbidden");
+			return res.end("Invalid token");
 		}
 		self._redis.hdel(public, function(err) {
 			if(err)
 				return self.error(err, res);
+			// successfully deleted
+			res.writeHead(204);
 			res.end();
 		})
 	
@@ -135,8 +146,9 @@ RequestHandler.prototype.uploadFile = function(req, res) {
 	auth = basicAuth(req);
 
 	if(auth === undefined) {
+		// no token submitted
 		res.writeHead(401);
-		return res.end("Unauthorized");
+		return res.end("Revoke token required");
 	}
 
 	self._redis.hget(public, 'token', function(err, value) {
@@ -144,19 +156,22 @@ RequestHandler.prototype.uploadFile = function(req, res) {
 			return self.error(err, res);
 		}
 		else if(value === null) {
+			// invalid (unused) storage volume id (public)
 			res.writeHead(404);
-			return res.end("Token Not found");
+			return res.end("Unknown Storage Volume");
 		}
 		else if(auth.pass !== null && value !== null && value === auth.pass) {
 			var saveTo = path.join(process.config.dataDir, public, chunkname);
 			req.pipe(fs.createWriteStream(saveTo));
 			req.on('end', function() {
-				res.end("OK");
+				res.writeHead(200);
+				res.end("Upload successful");
 			});
 		}
 		else {
-			res.writeHead(401);
-			res.end("Unauthorized\nwrong token");
+			// token is incorrect
+			res.writeHead(403);
+			res.end("Invalid token");
 		}
 	});
 }
