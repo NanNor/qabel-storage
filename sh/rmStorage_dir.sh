@@ -4,7 +4,7 @@
 # Copyright © 2014 tox <tox@rootkit>
 #
 
-public=$1
-datadir=$2
+datadir=$1
+public=$2
 
-rm -r -- "$public/$datadir"
+rm -r -- "$datadir/$public"
