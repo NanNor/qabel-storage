@@ -12,5 +12,5 @@ module.exports = {
 	storageCreater: "sh/newStorage_dir.sh",
 	storageRevoker: "sh/rmStorage_dir.sh",
 
-	creater_ip_whitelist: [ "5.9.68.29" ]
+	creater_ip_whitelist: [ "5.9.68.29", "127.0.0.1" ]
 }
