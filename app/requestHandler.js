@@ -121,14 +121,20 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 			res.writeHead(403);
 			return res.end("Invalid token");
 		}
-		self._redis.hdel(public, function(err) {
-			if(err)
-				return self.error(err, res);
-			// successfully deleted
+		if(blob != "") {
+			//TODO: Delete the file
 			res.writeHead(204);
 			res.end();
-		})
-	
+		}
+		else {
+			self._redis.del(public, function(err) {
+				if(err)
+					return self.error(err, res);
+				// successfully deleted
+				res.writeHead(204);
+				res.end();
+			})
+		}
 	});
 }
 
