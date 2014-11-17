@@ -104,12 +104,12 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 	var public = foo[0];
 	var blob = foo[1];
 
-	self._redis.hget(public, "revertToken", function(err, revertToken) {
+	self._redis.hget(public, "revoke_token", function(err, revoke_token) {
 		if(err)
 			return self.error(err, res);
 		var submittedToken = req.headers[process.config.tokenHeader];
 		var tokenMissing = submittedToken == null;
-		var authFailed = submittedToken != revertToken;
+		var authFailed = submittedToken != revoke_token;
 
 		if(tokenMissing) {
 			// no token has been submitted
