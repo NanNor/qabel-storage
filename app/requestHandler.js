@@ -98,10 +98,11 @@ RequestHandler.prototype.newStorage = function(res) {
 
 RequestHandler.prototype.deleteStorage = function(req, res) {
 	var self = this;
-	var public = uuid.v4();
 	console.log("request:");
 
-	var public = path.normalize(req.url).substr(path.sep.length);
+	var foo = (path.normalize(req.url).substr(path.sep.length)).split(path.sep);
+	var public = foo[0];
+	var blob = foo[1];
 
 	self._redis.hget(public, "revertToken", function(err, revertToken) {
 		if(err)
