@@ -7,7 +7,7 @@ module.exports = {
 	redisDb: 0,
 	uriPrefix: "/data",
 	uriNew: "/_new",
-	tokenHeader: "X-Qabel-Token",
+	tokenHeader: "x-qabel-token",
 
 	storageCreater: "sh/newStorage_dir.sh",
 	storageRevoker: "sh/rmStorage_dir.sh",
