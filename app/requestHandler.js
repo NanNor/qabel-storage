@@ -114,7 +114,7 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 		if(tokenMissing) {
 			// no token has been submitted
 			res.writeHead(401);
-			return res.end("Token required");
+			return res.end("Revoke token required");
 		}
 		if(authFailed) {
 			// Invalid token
@@ -146,12 +146,11 @@ RequestHandler.prototype.uploadFile = function(req, res) {
 		return self.error(new Error(), res);
 
 	var submittedToken = req.headers[process.config.tokenHeader];
-
 	var tokenMissing = submittedToken == null;
 	if(tokenMissing) {
 		// no token submitted
 		res.writeHead(401);
-		return res.end("Revoke token required");
+		return res.end("Token required");
 	}
 
 	self._redis.hget(public, 'token', function(err, storedToken) {
