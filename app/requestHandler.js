@@ -98,36 +98,43 @@ RequestHandler.prototype.newStorage = function(res) {
 
 RequestHandler.prototype.deleteStorage = function(req, res) {
 	var self = this;
-	var public = uuid.v4();
 	console.log("request:");
 
-	var public = path.normalize(req.url).substr(path.sep.length);
+	var foo = (path.normalize(req.url).substr(path.sep.length)).split(path.sep);
+	var public = foo[0];
+	var blob = foo[1];
 
-	self._redis.hget(public, "revertToken", function(err, revertToken) {
+	self._redis.hget(public, "revoke_token", function(err, revoke_token) {
 		if(err)
 			return self.error(err, res);
 		var submittedToken = req.headers[process.config.tokenHeader];
 		var tokenMissing = submittedToken == null;
-		var authFailed = submittedToken != revertToken;
+		var authFailed = submittedToken != revoke_token;
 
 		if(tokenMissing) {
 			// no token has been submitted
 			res.writeHead(401);
-			return res.end("Token required");
+			return res.end("Revoke token required");
 		}
 		if(authFailed) {
 			// Invalid token
 			res.writeHead(403);
 			return res.end("Invalid token");
 		}
-		self._redis.hdel(public, function(err) {
-			if(err)
-				return self.error(err, res);
-			// successfully deleted
+		if(blob != "") {
+			//TODO: Delete the file
 			res.writeHead(204);
 			res.end();
-		})
-	
+		}
+		else {
+			self._redis.del(public, function(err) {
+				if(err)
+					return self.error(err, res);
+				// successfully deleted
+				res.writeHead(204);
+				res.end();
+			})
+		}
 	});
 }
 
@@ -145,12 +152,11 @@ RequestHandler.prototype.uploadFile = function(req, res) {
 		return self.error(new Error(), res);
 
 	var submittedToken = req.headers[process.config.tokenHeader];
-
 	var tokenMissing = submittedToken == null;
 	if(tokenMissing) {
 		// no token submitted
 		res.writeHead(401);
-		return res.end("Revoke token required");
+		return res.end("Token required");
 	}
 
 	self._redis.hget(public, 'token', function(err, storedToken) {
