@@ -104,37 +104,91 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 	var public = foo[0];
 	var blob = foo[1];
 
-	self._redis.hget(public, "revoke_token", function(err, revoke_token) {
+	async.waterfall([
+		// Fetch authentication information from DB
+		function(callback) {
+			self._redis.hget(public, "revoke_token", function(err, revoke_token) {
+				callback(err, revoke_token);
+			});
+		},
+		// Authenticate token
+		function(revoke_token, callback) {
+			var submittedToken = req.headers[process.config.tokenHeader];
+			var tokenMissing = submittedToken == null;
+			var authFailed = submittedToken != revoke_token;
+
+			if(tokenMissing) {
+				// no token has been submitted
+				res.writeHead(401);
+				return res.end("Revoke token required");
+			}
+			if(authFailed) {
+				// Invalid token
+				res.writeHead(403);
+				return res.end("Invalid token");
+			}
+			callback(null);
+		},
+		// delete from filesystem and from database
+		function(callback) {
+			if(blob != "") {
+				// delete only a single blob inside a storage volume
+				async.parallel([
+					// remove public's directory from filesystem
+					function(callback) {
+						child_process.execFile(path.join(process.root,
+							process.config.blobDeleter), [
+								process.config.dataDir,
+								public,
+								blob
+							], {
+								cwd: process.root,
+								timeout: 10000
+							},
+							function(err, stdout, stderr) {
+								callback(err);
+							}
+						);
+					},
+				], function(err) {
+					callback(err);
+				});
+			}
+			else {
+				// delete whole storage volume
+				async.parallel([
+					// remove public's directory from filesystem
+					function(callback) {
+						child_process.execFile(path.join(process.root,
+							process.config.storageRevoker), [
+								process.config.dataDir,
+								public
+							], {
+								cwd: process.root,
+								timeout: 10000
+							},
+							function(err, stdout, stderr) {
+								callback(err);
+							}
+						);
+					},
+					// delete DB entry
+					function(callback) {
+						self._redis.del(public, function(err) {
+							callback(err)
+						})
+					}
+				], function(err) {
+					callback(err);
+				});
+			}
+		}
+	], function(err) {
 		if(err)
 			return self.error(err, res);
-		var submittedToken = req.headers[process.config.tokenHeader];
-		var tokenMissing = submittedToken == null;
-		var authFailed = submittedToken != revoke_token;
-
-		if(tokenMissing) {
-			// no token has been submitted
-			res.writeHead(401);
-			return res.end("Revoke token required");
-		}
-		if(authFailed) {
-			// Invalid token
-			res.writeHead(403);
-			return res.end("Invalid token");
-		}
-		if(blob != "") {
-			//TODO: Delete the file
-			res.writeHead(204);
-			res.end();
-		}
-		else {
-			self._redis.del(public, function(err) {
-				if(err)
-					return self.error(err, res);
-				// successfully deleted
-				res.writeHead(204);
-				res.end();
-			})
-		}
+		// successfully deleted
+		res.writeHead(204);
+		res.end();
 	});
 }
 
