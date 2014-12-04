@@ -6,6 +6,9 @@ var async = require('async');
 var child_process = require('child_process');
 var validator = require("validator");
 
+var PBKDF2_ITERATIONS = 10000;
+var PBKDF2_KEYLEN = 256;
+
 function RequestHandler(redis) {
 	var self = this;
 	this.handle = this.handle.bind(this);
@@ -159,14 +162,19 @@ RequestHandler.prototype.newStorage = function(res) {
 	async.waterfall([
 		// Create Randum Bytes
 		function(callback) {
-			crypto.randomBytes(256, function(ex, buf) {
-				var token = buf.slice(0,128).toString('base64')
-				var revoke_token = buf.slice(128,256).toString('base64');
-				callback(null, token, revoke_token);
+			var tokenLength = 128;
+			var revokeTokenLength = 128;
+			var saltLength = 128;
+			var requiredBytes = tokenLength + revokeTokenLength + saltLength;
+			crypto.randomBytes(requiredBytes, function(ex, buf) {
+				var token = buf.slice(0,tokenLength).toString('base64')
+				var revoke_token = buf.slice(tokenLength,tokenLength+revokeTokenLength).toString('base64');
+				var salt = buf.slice(tokenLength+revokeTokenLength,requiredBytes).toString('base64');
+				callback(null, token, revoke_token, salt);
 			});
 		},
 		// Create filedir
-		function(token, revoke_token, callback) {
+		function(token, revoke_token, salt, callback) {
 			child_process.execFile(path.join(process.root,
 					process.config.storageCreater), [
 						process.config.dataDir,
@@ -176,17 +184,24 @@ RequestHandler.prototype.newStorage = function(res) {
 						timeout: 10000
 					},
 					function(err, stdout, stderr) {
-				callback(err, token, revoke_token);
+				callback(err, token, revoke_token, salt);
 			});
 		},
 		// Write into Database
-		function(token, revoke_token, callback) {
-			var transaction = self._redis.multi()
-			transaction.hset(public, "token", token);
-			transaction.hset(public, "revoke_token", revoke_token);
-			transaction.bgsave();
-			transaction.exec(function(err) {
-				callback(err, token, revoke_token);
+		function(token, revoke_token, salt, callback) {
+			var transaction = self._redis.multi();
+			transaction.hset(public, "salt", salt);
+			// hash token
+			crypto.pbkdf2(token, salt, PBKDF2_ITERATIONS, PBKDF2_KEYLEN, function(err, derivedKey) {
+				transaction.hset(public, "token", derivedKey);
+				// hash revoke_token
+				crypto.pbkdf2(revoke_token, salt, PBKDF2_ITERATIONS, PBKDF2_KEYLEN, function(err, derivedKey) {
+					transaction.hset(public, "revoke_token", derivedKey);
+					transaction.bgsave();
+					transaction.exec(function(err) {
+						callback(err, token, revoke_token);
+					});
+				});
 			});
 		},
 	], function(err, token, revoke_token) {
@@ -211,34 +226,39 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 	var blob = pathParts[1];
 
 	async.waterfall([
-		// Fetch authentication information from DB
-		function(callback) {
-			self._redis.hget(public, "revoke_token", function(err, revoke_token) {
-				if(revoke_token == null) {
-					// no token found for this public identifier
-					res.writeHead(404);
-					return res.end("Unknown public identifier");
-				}
-				callback(err, revoke_token);
-			});
-		},
 		// Authenticate token
-		function(revoke_token, callback) {
+		function(callback) {
 			var submittedToken = req.headers[process.config.tokenHeader];
 			var tokenMissing = submittedToken == null;
-			var authFailed = submittedToken != revoke_token;
 
 			if(tokenMissing) {
 				// no token has been submitted
 				res.writeHead(401);
 				return res.end("Revoke token required");
 			}
-			if(authFailed) {
-				// Invalid token
-				res.writeHead(403);
-				return res.end("Invalid token");
-			}
-			callback(null);
+
+			// Hash submitted token and compare
+			self._auth_token(public, "revoke_token", submittedToken, new AuthHandler(
+				// unknown entity
+				function() {
+					// invalid (unused) storage volume id (public)
+					res.writeHead(404);
+					res.end("Unknown Storage Volume");
+				},
+				// rejected - token is incorrect
+				function() {
+					res.writeHead(403);
+					res.end("Invalid token");
+				},
+				// granted - delete
+				function() {
+					// process deletion while rushing down the waterfall
+					callback(null);
+				},
+				function(err) {
+					callback(err);
+				}
+			));
 		},
 		// delete from filesystem and from database
 		function(callback) {
@@ -303,6 +323,63 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 	});
 }
 
+function AuthHandler(unknown, rejected, granted, error) {
+	this.unknown = unknown;
+	this.rejected = rejected;
+	this.granted = granted;
+	this.error = error;
+}
+
+RequestHandler.prototype._auth_token = function(public, tokenType, tokenValue, authHandler) {
+	var self = this;
+
+	async.waterfall([
+		// get salt and hash from DB
+		function(callback) {
+			self._redis.hmget(public, tokenType, "salt", function(err, values) {
+				if(err) {
+					callback(err);
+				}
+				var storedHash = values[0];
+				var salt = values[1];
+				if(storedHash == null || salt == null) {
+					authHandler.unknown();
+				}
+				else {
+					callback(null, storedHash, salt);
+				}
+			});
+		},
+		// hash submitted token and compare to stored hash
+		function(storedHash, salt, callback) {
+			crypto.pbkdf2(tokenValue, salt, PBKDF2_ITERATIONS, PBKDF2_KEYLEN, function(err, calcHash) {
+				var isAuthorized = false;
+				if(err) {
+					callback(err);
+				}
+				if(calcHash == storedHash) {
+					isAuthorized = true;
+				}
+				callback(null, isAuthorized);
+			});
+		},
+		// respond
+		function(isAuthorized, callback) {
+			if(isAuthorized) {
+				authHandler.granted();
+			}
+			else {
+				authHandler.rejected();
+			}
+			callback(null);
+		},
+	],
+	function(err) {
+		if(err) {
+			authHandler.error(err);
+		}
+	});
+}
 
 RequestHandler.prototype.uploadFile = function(req, res) {
 	var self = this;
@@ -320,29 +397,32 @@ RequestHandler.prototype.uploadFile = function(req, res) {
 		return res.end("Token required");
 	}
 
-	self._redis.hget(public, 'token', function(err, storedToken) {
-		if(err) {
-			return self.error(err, res);
-		}
-		else if(storedToken === null) {
+	// Hash submitted token and compare
+	this._auth_token(public, "token", submittedToken, new AuthHandler(
+		// unknown entity
+		function() {
 			// invalid (unused) storage volume id (public)
 			res.writeHead(404);
-			return res.end("Unknown Storage Volume");
-		}
-		else if(storedToken === submittedToken) {
+			res.end("Unknown Storage Volume");
+		},
+		// rejected - token is incorrect
+		function() {
+			res.writeHead(403);
+			res.end("Invalid token");
+		},
+		// granted
+		function() {
 			var saveTo = path.join(process.config.dataDir, public, chunkname);
 			req.pipe(fs.createWriteStream(saveTo));
 			req.on('end', function() {
 				res.writeHead(200);
 				res.end("Upload successful");
 			});
+		},
+		function(err) {
+			self.error(err, res);
 		}
-		else {
-			// token is incorrect
-			res.writeHead(403);
-			res.end("Invalid token");
-		}
-	});
+	));
 }
 
 RequestHandler.prototype.error = function(err, res) {
