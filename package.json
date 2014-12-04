@@ -13,7 +13,8 @@
     "dirlist": "^1.0.2",
     "redis": "*",
     "basic-auth": "*",
-    "uuid": "*"
+    "uuid": "*",
+    "validator": "*"
   },
   "keywords": [
     "qabel"
