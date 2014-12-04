@@ -4,6 +4,7 @@ var uuid = require("uuid");
 var crypto = require('crypto');
 var async = require('async');
 var child_process = require('child_process');
+var validator = require("validator");
 
 function RequestHandler(redis) {
 	var self = this;
@@ -13,25 +14,131 @@ function RequestHandler(redis) {
 }
 
 RequestHandler.prototype.handle = function(req, res, next) {
-	if(req.method === 'GET')
-		return next();
-
 	var url = path.normalize(req.url);
 
 	var method = req.method;
+
+	// treat PUT requests like POST requests
 	if(method == 'PUT')
 		method = 'POST';
-	if(url === process.config.uriNew && method == 'POST' && allowed(req, res)) {
+
+	if(req.method === 'GET') {
+		return this.getRessource(req, res);
+	}
+	else if(method === 'POST' && url === process.config.uriNew && allowed(req, res)) {
 		return this.newStorage(res);
+	}
+	else if(method === 'POST') {
+		return this.uploadFile(req, res)
 	}
 	else if(method === 'DELETE') {
 		return this.deleteStorage(req, res);
 	}
 	else {
-		return this.uploadFile(req, res)
+		return this.error(new Error("Unexpected request"), res);
 	}
 	return next();
 }
+
+function isValidPublic(public) {
+	return (public != null && validator.isUUID(public));
+}
+
+function parseRessourcePath(reqPath, res) {
+	var normalizedPath = path.normalize(reqPath);
+
+	if(normalizedPath !== reqPath) {
+		// given request path contained normalizable parts
+		// this can be due to missing path components like
+		// public identifier and is therefore generally
+		// forbidden
+		res.writeHead(400);
+		res.end("Invalid url");
+	}
+
+	var pathChunks = reqPath.substr(path.sep.length).split(path.sep);
+	var public = pathChunks[0];
+	var blobname = pathChunks[1];
+
+	if(public == null || !isValidPublic(public)) {
+		// invalid request - QSV id missing or invalid
+		res.writeHead(400);
+		res.end("Storage Volume ID missing or invalid");
+	}
+
+	if(blobname === "") {
+		blobname = null;
+	}
+
+	return [public, blobname];
+}
+
+RequestHandler.prototype.getRessource = function(req, res) {
+	var self = this;
+
+	async.waterfall([
+		// check syntactical correctness of request
+		function(callback) {
+			var p = parseRessourcePath(req.url, res);
+			var public = p[0];
+			var blobname = p[1]; // blobname may be null if QSV is probed
+
+			callback(null, public, blobname);
+		},
+		// check existence of public id
+		function(public, blobname, callback) {
+			self._redis.exists(public, function(err, public_exists) {
+				if(err) {
+					return callback(err);
+				}
+				if(public_exists === 0) {
+					// QSV with the given public does not exist
+					res.writeHead(404);
+					return res.end("Unknown Storage Volume");
+				}
+				else if(public_exists && blobname == null) {
+					// only QSV probing requested
+					// nothing more to do
+					res.writeHead(200);
+					return res.end("Storage Volume exists");
+				}
+				callback(null, public, blobname);
+			});
+		},
+		// check existence of blob
+		function(public, blobname, callback) {
+			var blobPath = path.join(process.config.dataDir, public, blobname);
+			fs.exists(blobPath, function(exists) {
+				if(exists) {
+					callback(null, public, blobname);
+				}
+				else {
+					// nothing more to do
+					res.writeHead(404);
+					return res.end("Unknown blob name");
+				}
+			});
+		},
+		// deliver blob
+		function(public, blobname, callback) {
+			var blobPath = path.join(process.config.dataDir, public, blobname);
+			var blobReadStream = fs.createReadStream(blobPath);
+			blobReadStream.on('open', function() {
+				res.writeHead(200);
+				blobReadStream.pipe(res);
+				callback(null);
+			});
+			blobReadStream.on('error', function(err) {
+				callback(err);
+			});
+		}
+	], function(err) {
+		if(err) {
+			self.error(err, res);
+		}
+	});
+}
+
 function allowed(req, res) {
 	var i;
 
@@ -98,16 +205,20 @@ RequestHandler.prototype.newStorage = function(res) {
 
 RequestHandler.prototype.deleteStorage = function(req, res) {
 	var self = this;
-	console.log("request:");
 
-	var foo = (path.normalize(req.url).substr(path.sep.length)).split(path.sep);
-	var public = foo[0];
-	var blob = foo[1];
+	var pathParts = parseRessourcePath(req.url, res);
+	var public = pathParts[0];
+	var blob = pathParts[1];
 
 	async.waterfall([
 		// Fetch authentication information from DB
 		function(callback) {
 			self._redis.hget(public, "revoke_token", function(err, revoke_token) {
+				if(revoke_token == null) {
+					// no token found for this public identifier
+					res.writeHead(404);
+					return res.end("Unknown public identifier");
+				}
 				callback(err, revoke_token);
 			});
 		},
@@ -131,7 +242,7 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 		},
 		// delete from filesystem and from database
 		function(callback) {
-			if(blob != "") {
+			if(blob != null) {
 				// delete only a single blob inside a storage volume
 				async.parallel([
 					// remove public's directory from filesystem
@@ -195,15 +306,11 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 
 RequestHandler.prototype.uploadFile = function(req, res) {
 	var self = this;
-	var token = null;
 	var hasFile = false;
 
-	var p = req.url.split(path.sep);
-	var public = p[1];
-	var chunkname = p[2];
-
-	if(token === undefined || public === undefined)
-		return self.error(new Error(), res);
+	var p = parseRessourcePath(req.url, res)
+	var public = p[0];
+	var chunkname = p[1];
 
 	var submittedToken = req.headers[process.config.tokenHeader];
 	var tokenMissing = submittedToken == null;
