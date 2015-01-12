@@ -22,7 +22,7 @@ RequestHandler.prototype.handle = function(req, res, next) {
 	var method = req.method;
 
 	// treat PUT requests like POST requests
-	if(method == 'PUT')
+	if(method === 'PUT')
 		method = 'POST';
 
 	if(req.method === 'GET') {
@@ -99,7 +99,7 @@ RequestHandler.prototype.getRessource = function(req, res) {
 					res.writeHead(404);
 					return res.end("Unknown Storage Volume");
 				}
-				else if(public_exists && blobname == null) {
+				else if(public_exists && blobname === null) {
 					// only QSV probing requested
 					// nothing more to do
 					res.writeHead(200);
@@ -229,7 +229,7 @@ RequestHandler.prototype.deleteStorage = function(req, res) {
 		// Authenticate token
 		function(callback) {
 			var submittedToken = req.headers[process.config.tokenHeader];
-			var tokenMissing = submittedToken == null;
+			var tokenMissing = submittedToken === undefined;
 
 			if(tokenMissing) {
 				// no token has been submitted
@@ -357,7 +357,7 @@ RequestHandler.prototype._auth_token = function(public, tokenType, tokenValue, a
 				if(err) {
 					callback(err);
 				}
-				if(calcHash == storedHash) {
+				if(calcHash.toString('base64') === storedHash) {
 					isAuthorized = true;
 				}
 				callback(null, isAuthorized);
