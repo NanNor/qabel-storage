@@ -357,7 +357,7 @@ RequestHandler.prototype._auth_token = function(public, tokenType, tokenValue, a
 				if(err) {
 					callback(err);
 				}
-				if(calcHash.toString('base64') === storedHash) {
+				if(calcHash.toString() === storedHash) {
 					isAuthorized = true;
 				}
 				callback(null, isAuthorized);
