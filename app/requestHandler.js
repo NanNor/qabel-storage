@@ -69,7 +69,7 @@ function parseRessourcePath(reqPath, res) {
 		res.end("Storage Volume ID missing or invalid");
 	}
 
-	if(blobname === "") {
+	if(blobname === undefined || blobname === "") {
 		blobname = null;
 	}
 
